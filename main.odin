@@ -10,7 +10,7 @@ import "core:sys/posix"
 import "core:thread"
 import "base:runtime"
 
-HID_DEVICE_PATH := os.args[1]
+HID_DEVICE_PATH := len(os.args) > 1 ? os.args[1] : ""
 
 exit: bool
 
