@@ -8,7 +8,9 @@ import "core:log"
 import "core:fmt"
 import "core:sys/posix"
 import "core:thread"
+import "core:sync"
 import "base:runtime"
+import "vendor:miniaudio"
 
 HID_DEVICE_PATH := len(os.args) > 1 ? os.args[1] : ""
 
@@ -24,14 +26,40 @@ macro_action :: proc(t: ^thread.Thread) {
 
     context.allocator = d.allocator
 
-    command := os.Process_Desc {
-        command = {"sh", "-c", d.assigned_action },
-    }
+    switch {
+    case strings.ends_with(d.assigned_action, ".wav"):
+        audio_engine := miniaudio.engine{}
+        sound := miniaudio.sound{}
 
-    _, process_err := os.process_start(command)
+        miniaudio.engine_init(nil, &audio_engine)
 
-    if process_err != nil {
-        log.errorf("failed action for %v: %v", d.assigned_action, process_err)
+        miniaudio.sound_init_from_file(&audio_engine, strings.clone_to_cstring(d.assigned_action), {}, nil, nil, &sound)
+
+        miniaudio.sound_start(&sound)
+
+        sound_end_proc :: proc "c" (data: rawptr, sound: ^miniaudio.sound) {
+            d := cast(^sync.Sema)data
+
+            sync.post(d)
+        }
+
+        sema := sync.Sema{}
+        miniaudio.sound_set_end_callback(&sound, sound_end_proc, &sema)
+
+        sync.wait(&sema)
+
+        miniaudio.sound_uninit(&sound)
+        miniaudio.engine_uninit(&audio_engine)
+    case strings.ends_with(d.assigned_action, ".sh"):
+        command := os.Process_Desc {
+            command = {"sh", "-c", d.assigned_action },
+        }
+
+        _, process_err := os.process_start(command)
+
+        if process_err != nil {
+            log.errorf("failed action for %v: %v", d.assigned_action, process_err)
+        }
     }
 
     free_all(d.allocator)
@@ -98,6 +126,12 @@ main :: proc() {
         case .EIO:
             log.errorf("failed receiving data from %v: %v", HID_DEVICE_PATH, hid_read_err)
             exit = true
+        case .EINTR:
+            exit = true
+        }
+
+        if exit {
+            break
         }
 
         hid_key := fmt.tprintf("%v.%v", buf[0], buf[1])
