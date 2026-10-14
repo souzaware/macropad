@@ -83,7 +83,8 @@ main :: proc() {
     config_file, config_file_err := os.read_entire_file(config_file_path, context.allocator)
 
     if config_file_err != nil {
-        fmt.println("fuck me")
+        log.errorf("failed reading config file: %v", config_file_err)
+        return
     }
 
     config_map, config_map_err := json.parse(config_file)
